@@ -211,6 +211,8 @@ public class MainActivity extends Activity {
         c.threadStarted=true;final boolean adaptive=enhance,nsRequested=lightNoise;
         new Thread(()->{AudioRecord mic=null;AutomaticGainControl agc=null;NoiseSuppressor ns=null;boolean software=adaptive;byte[] chunk=new byte[3200];int filled=0;
             try {
+                if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)
+                    throw new SecurityException("microphone permission revoked");
                 int min=AudioRecord.getMinBufferSize(16000,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT);if(min<=0)throw new IOException("unsupported microphone");
                 for(int source:new int[]{MediaRecorder.AudioSource.VOICE_RECOGNITION,MediaRecorder.AudioSource.MIC}){
                     mic=new AudioRecord(source,16000,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT,Math.max(min,12800));
@@ -234,7 +236,8 @@ public class MainActivity extends Activity {
                         if(now-forced>=10000){c.socket.send("{\"type\":\"ForceEndpoint\"}");forced=now;}
                     }
                 }
-            }catch(Exception e){main.post(()->{if(capture==c&&c.active&&!destroyed)stopCapture("收音或上传中断 · 检查麦克风占用与网络后继续");});}
+            }catch(SecurityException e){main.post(()->{if(capture==c&&c.active&&!destroyed)stopCapture("麦克风权限不可用 · 请在系统设置中允许后继续");});}
+            catch(Exception e){main.post(()->{if(capture==c&&c.active&&!destroyed)stopCapture("收音或上传中断 · 检查麦克风占用与网络后继续");});}
             finally {
                 if(filled>0&&c.socket!=null&&!c.terminated.get()){
                     try{Arrays.fill(chunk,filled,chunk.length,(byte)0);c.processor.process(chunk,chunk.length,software,SystemClock.elapsedRealtime());if(c.socket.queueSize()<=160000)c.socket.send(ByteString.of(chunk));}catch(Exception ignored){}
