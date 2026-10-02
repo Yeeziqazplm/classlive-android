@@ -29,7 +29,7 @@ def build():
  output=ROOT/'build-local';shutil.rmtree(output,ignore_errors=True);output.mkdir();(output/'classes').mkdir();(output/'dex').mkdir()
  manifest=ET.parse(ROOT/'app/src/main/AndroidManifest.xml');manifest.getroot().set('package','com.yeezi.classlive');manifest.write(output/'AndroidManifest.xml',encoding='utf-8')
  run(tools/'aapt2','compile','--dir',ROOT/'app/src/main/res','-o',output/'res.zip')
- run(tools/'aapt2','link','-I',android,'--manifest',output/'AndroidManifest.xml','--min-sdk-version','26','--target-sdk-version','35','--version-code','1','--version-name','0.1.0','-o',output/'base.apk',output/'res.zip')
+ run(tools/'aapt2','link','-I',android,'--manifest',output/'AndroidManifest.xml','--min-sdk-version','26','--target-sdk-version','35','--version-code','2','--version-name','0.2.0','-o',output/'base.apk',output/'res.zip')
  javafiles=list((ROOT/'app/src/main/java').rglob('*.java'))
  run('java','-m','jdk.compiler/com.sun.tools.javac.Main','-source','8','-target','8','-encoding','UTF-8','-classpath',os.pathsep.join(map(str,[android,CACHE/'okhttp.jar',CACHE/'okio.jar'])),'-d',output/'classes',*javafiles)
  with zipfile.ZipFile(output/'classes.jar','w') as z:
@@ -42,7 +42,7 @@ def build():
  key=CACHE/'debug.jks'
  if not key.exists():
   run('keytool','-genkeypair','-keystore',key,'-storepass','android','-keypass','android','-alias','androiddebugkey','-dname','CN=ClassLive local debug','-keyalg','RSA','-validity','10000')
- apk=ROOT.parent/'ClassLive-0.1.0.apk'
+ apk=ROOT.parent/'ClassLive-0.2.0.apk'
  signer=tools/'lib/apksigner.jar'
  run('java','-jar',signer,'sign','--ks',key,'--ks-pass','pass:android','--key-pass','pass:android','--out',apk,output/'aligned.apk')
  run('java','-jar',signer,'verify','--verbose',apk)
