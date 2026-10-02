@@ -1,0 +1,14 @@
+.gradle/
+build/
+app/build/
+local.properties
+.build-cache/
+build-local/
+__pycache__/
+*.pyc
+*.jks
+*.keystore
+*.idsig
+.env
+.env.*
+ClassLive-build-checkpoint.zip
