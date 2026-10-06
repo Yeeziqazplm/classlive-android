@@ -3,9 +3,12 @@ Dependencies are downloaded on first use into .build-cache, and a local debug ke
 The local APK produced this way is signed by that key, not by an app-store publisher.
 """
 from pathlib import Path
-import os, shutil, subprocess, urllib.request, zipfile, xml.etree.ElementTree as ET
+import os, re, shutil, subprocess, urllib.request, zipfile, xml.etree.ElementTree as ET
 ROOT=Path(__file__).resolve().parent
-CACHE=ROOT/'.build-cache'; CACHE.mkdir(exist_ok=True)
+CACHE=Path(os.environ.get('CLASSLIVE_BUILD_CACHE',str(ROOT/'.build-cache'))); CACHE.mkdir(exist_ok=True)
+config=(ROOT/'app/build.gradle').read_text()
+VERSION_CODE=re.search(r'versionCode\s+(\d+)',config).group(1)
+VERSION_NAME=re.search(r"versionName\s+'([0-9.]+)'",config).group(1)
 urls={
  'platform.zip':'https://dl.google.com/android/repository/platform-35_r02.zip',
  'tools.zip':'https://dl.google.com/android/repository/build-tools_r35_linux.zip',
@@ -29,7 +32,7 @@ def build():
  output=ROOT/'build-local';shutil.rmtree(output,ignore_errors=True);output.mkdir();(output/'classes').mkdir();(output/'dex').mkdir()
  manifest=ET.parse(ROOT/'app/src/main/AndroidManifest.xml');manifest.getroot().set('package','com.yeezi.classlive');manifest.write(output/'AndroidManifest.xml',encoding='utf-8')
  run(tools/'aapt2','compile','--dir',ROOT/'app/src/main/res','-o',output/'res.zip')
- run(tools/'aapt2','link','-I',android,'--manifest',output/'AndroidManifest.xml','--min-sdk-version','26','--target-sdk-version','35','--version-code','2','--version-name','0.2.0','-o',output/'base.apk',output/'res.zip')
+ run(tools/'aapt2','link','-I',android,'--manifest',output/'AndroidManifest.xml','--min-sdk-version','26','--target-sdk-version','35','--version-code',VERSION_CODE,'--version-name',VERSION_NAME,'-o',output/'base.apk',output/'res.zip')
  javafiles=list((ROOT/'app/src/main/java').rglob('*.java'))
  run('java','-m','jdk.compiler/com.sun.tools.javac.Main','-source','8','-target','8','-encoding','UTF-8','-classpath',os.pathsep.join(map(str,[android,CACHE/'okhttp.jar',CACHE/'okio.jar'])),'-d',output/'classes',*javafiles)
  with zipfile.ZipFile(output/'classes.jar','w') as z:
@@ -42,7 +45,7 @@ def build():
  key=CACHE/'debug.jks'
  if not key.exists():
   run('keytool','-genkeypair','-keystore',key,'-storepass','android','-keypass','android','-alias','androiddebugkey','-dname','CN=ClassLive local debug','-keyalg','RSA','-validity','10000')
- apk=ROOT.parent/'ClassLive-0.2.0.apk'
+ apk=ROOT.parent/f'ClassLive-{VERSION_NAME}.apk'
  signer=tools/'lib/apksigner.jar'
  run('java','-jar',signer,'sign','--ks',key,'--ks-pass','pass:android','--key-pass','pass:android','--out',apk,output/'aligned.apk')
  run('java','-jar',signer,'verify','--verbose',apk)

@@ -37,6 +37,7 @@ public class MainActivity extends Activity {
     private String asrKey="",deepKey="",model="deepseek-flash",speechModel="universal-streaming-english";
     private String glossary="HUD=抬头显示; UI=用户界面; UX=用户体验; level design=关卡设计; mission design=任务设计; affordance=可供性; blockout=关卡白盒; greybox=灰盒; diegetic=叙事内";
     private boolean enhance=true,lightNoise=false;
+    private int micMode=0; // 0: auto, 1: MIC first, 2: VOICE_RECOGNITION first
     private int windowStart=0;
     private static final class Card {LinearLayout root;TextView output;Button retry;}
     private static final class Capture {
@@ -44,7 +45,7 @@ public class MainActivity extends Activity {
         final Set<Integer> finalized=new HashSet<>();final AtomicBoolean terminated=new AtomicBoolean();
         volatile boolean active=true,threadStarted=false;boolean accepting=true,begun=false;
         volatile AudioRecord mic;WebSocket socket;volatile long startedMs,stoppedMs;long lastCheckpoint,lastDraftSave;
-        String lastTranscript="",effectNote="";int partialOrder=-1;
+        String effectNote="";int partialOrder=-1;
         Capture(Lecture l){lecture=l;}
         void terminate(){if(socket!=null&&terminated.compareAndSet(false,true)){socket.send("{\"type\":\"ForceEndpoint\"}");socket.send("{\"type\":\"Terminate\"}");}}
     }
@@ -62,6 +63,7 @@ public class MainActivity extends Activity {
         try{asrKey=vault.get("assembly");deepKey=vault.get("deepseek");}catch(Exception e){toast("请在设置中重新填写 API 密钥。");}
         model=prefs.getString("model",model);speechModel=prefs.getString("speechModel",speechModel);glossary=prefs.getString("glossary",glossary);
         enhance=prefs.getBoolean("enhance",true);lightNoise=prefs.getBoolean("lightNoise",false);
+        micMode=Math.max(0,Math.min(2,prefs.getInt("micMode",0)));
         buildUi();
         try {
             store=new LectureStore(this);
@@ -80,7 +82,7 @@ public class MainActivity extends Activity {
     private void buildUi(){
         LinearLayout root=column();root.setBackgroundColor(bg);
         root.setOnApplyWindowInsetsListener((v,i)->{root.setPadding(dp(16)+i.getSystemWindowInsetLeft(),dp(8)+i.getSystemWindowInsetTop(),dp(16)+i.getSystemWindowInsetRight(),dp(8)+i.getSystemWindowInsetBottom());return i.consumeSystemWindowInsets();});
-        TextView brand=text("CLASSLIVE  /  课堂翻译  0.2",12,mint);brand.setLetterSpacing(.12f);root.addView(brand);
+        TextView brand=text("CLASSLIVE  /  课堂翻译  0.3",12,mint);brand.setLetterSpacing(.12f);root.addView(brand);
         title=text("课堂记录",23,white);title.setTypeface(null,Typeface.BOLD);title.setPadding(0,dp(7),0,dp(3));root.addView(title);title.setOnClickListener(v->rename());
         status=text("准备就绪 · 点击课程名可修改",12,muted);root.addView(status);
         LinearLayout tools=new LinearLayout(this);Button config=button("设置"),history=button("课堂记录"),export=button("生成 TXT");
@@ -92,8 +94,8 @@ public class MainActivity extends Activity {
         counts=text("文字自动保存 · TXT 按需生成",11,muted);root.addView(counts);
         scroll=new ScrollView(this);list=column();scroll.addView(list);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
         partial=text("等待老师讲话…",17,muted);partial.setMaxLines(4);partial.setEllipsize(android.text.TextUtils.TruncateAt.START);partial.setBackground(shape(panel));partial.setPadding(dp(12),dp(10),dp(12),dp(10));root.addView(partial);
-        quality=text("温和音量优化已开启",12,mint);quality.setPadding(0,dp(6),0,0);root.addView(quality);
-        details=text("前台收音 · 切换应用会暂停",10,muted);details.setMaxLines(2);root.addView(details);
+        quality=text(enhance?"本地音量优化已开启":"软件增益关闭 · 收音监测开启",12,mint);quality.setPadding(0,dp(6),0,0);root.addView(quality);
+        details=text("前台收音 · 切换应用会暂停",10,muted);details.setMaxLines(3);root.addView(details);
         start=button("开始听课");start.setTextSize(16);start.setBackground(shape(mint));start.setTextColor(bg);LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(-1,dp(50));sp.topMargin=dp(7);root.addView(start,sp);
         start.setOnClickListener(v->{if(capture!=null&&capture.active)stopCapture("已暂停，文字已保留");else begin();});setContentView(root);follow.setOnCheckedChangeListener((v,on)->{if(on&&current!=null){windowStart=Math.max(0,current.lines.size()-100);renderRows();}});
     }
@@ -189,7 +191,6 @@ public class MainActivity extends Activity {
             }else if(type.equals("Turn")){
                 String en=m.optString("transcript").trim();if(en.isEmpty())return;int order=m.optInt("turn_order",-1);if(order<0)throw new JSONException("turn order");
                 if(c.finalized.contains(order))return;
-                if(!en.equals(c.lastTranscript)){c.processor.noteSpeech(SystemClock.elapsedRealtime());c.lastTranscript=en;}
                 if(m.optBoolean("end_of_turn")){
                     c.finalized.add(order);JSONArray words=m.optJSONArray("words");double sum=0;int count=0;
                     if(words!=null)for(int i=0;i<words.length();i++){double v=words.getJSONObject(i).optDouble("confidence",Double.NaN);if(!Double.isNaN(v)){sum+=v;count++;}}
@@ -208,29 +209,20 @@ public class MainActivity extends Activity {
         }catch(Exception e){stopCapture("语音返回格式异常，已保留现有文字");finishCapture(c);}
     }
     private void startMic(Capture c){
-        c.threadStarted=true;final boolean adaptive=enhance,nsRequested=lightNoise;
-        new Thread(()->{AudioRecord mic=null;AutomaticGainControl agc=null;NoiseSuppressor ns=null;boolean software=adaptive;byte[] chunk=new byte[3200];int filled=0;
+        c.threadStarted=true;final boolean adaptive=enhance,nsRequested=lightNoise;final int selectedMicMode=micMode;
+        new Thread(()->{AudioRecord mic=null;MicrophoneInput input=null;boolean software=adaptive;byte[] chunk=new byte[3200];int filled=0;
             try {
                 if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)
                     throw new SecurityException("microphone permission revoked");
-                int min=AudioRecord.getMinBufferSize(16000,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT);if(min<=0)throw new IOException("unsupported microphone");
-                for(int source:new int[]{MediaRecorder.AudioSource.VOICE_RECOGNITION,MediaRecorder.AudioSource.MIC}){
-                    mic=new AudioRecord(source,16000,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT,Math.max(min,12800));
-                    if(mic.getState()==AudioRecord.STATE_INITIALIZED)break;mic.release();mic=null;
-                }
-                if(mic==null)throw new IOException("microphone initialization");
-                // Inspect existing system AGC; never automatically enable it.
-                try {if(AutomaticGainControl.isAvailable()){agc=AutomaticGainControl.create(mic.getAudioSessionId());if(agc!=null&&agc.getEnabled()){software=false;c.effectNote="系统增益已启用，软件不叠加";}}}catch(Exception ignored){}
-                if(nsRequested) {
-                    try {if(NoiseSuppressor.isAvailable()){ns=NoiseSuppressor.create(mic.getAudioSessionId());if(ns!=null&&ns.setEnabled(true)==AudioEffect.SUCCESS&&ns.getEnabled())c.effectNote+=" · 轻降噪已开启";else c.effectNote+=" · 轻降噪不可用，保持原声";}else c.effectNote+=" · 本机无系统降噪，保持原声";}catch(Exception ignored){c.effectNote+=" · 轻降噪未生效，保持原声";}
-                }
+                input=MicrophoneInput.open(this,selectedMicMode,adaptive,nsRequested);
+                mic=input.recorder;software=input.softwareEnhancement;c.effectNote=input.description;
                 if(!c.active)return;c.mic=mic;mic.startRecording();c.startedMs=SystemClock.elapsedRealtime();c.lastCheckpoint=c.startedMs;
                 long forced=c.startedMs;int packets=0;
                 while(c.active){int n=mic.read(chunk,filled,chunk.length-filled);if(n<0){if(!c.active)break;throw new IOException("microphone read");}if(n==0)continue;filled+=n;
                     if(filled==chunk.length){long now=SystemClock.elapsedRealtime();AudioProcessor.Metrics measurement=c.processor.process(chunk,filled,software,now);
                         if(c.socket.queueSize()>160000||!c.socket.send(ByteString.of(chunk)))throw new IOException("upload backlog");filled=0;
                         if(++packets%3==0)main.post(()->{if(capture!=c||!c.active||destroyed)return;quality.setText(measurement.state);quality.setTextColor(measurement.warning?amber:mint);
-                            details.setText(String.format(Locale.UK,"输入 %.0f dBFS · 增益 %+.1f dB · %d 分 %d 秒%s",measurement.rmsDb,measurement.gainDb,(now-c.startedMs)/60000,(now-c.startedMs)/1000%60,c.effectNote.isEmpty()?"":" · "+c.effectNote));
+                            details.setText(String.format(Locale.UK,"原始 %.0f → 输出 %.0f dBFS · 增益 %+.1f dB\n%d 分 %d 秒 · %s",measurement.rmsDb,measurement.outputDb,measurement.gainDb,(now-c.startedMs)/60000,(now-c.startedMs)/1000%60,c.effectNote));
                             if(now-c.lastCheckpoint>5000){account(c);persist(c.lecture);}
                         });
                         if(now-forced>=10000){c.socket.send("{\"type\":\"ForceEndpoint\"}");forced=now;}
@@ -243,8 +235,7 @@ public class MainActivity extends Activity {
                     try{Arrays.fill(chunk,filled,chunk.length,(byte)0);c.processor.process(chunk,chunk.length,software,SystemClock.elapsedRealtime());if(c.socket.queueSize()<=160000)c.socket.send(ByteString.of(chunk));}catch(Exception ignored){}
                 }
                 c.terminate();
-                if(mic!=null){try{mic.stop();}catch(Exception ignored){}mic.release();}c.mic=null;
-                if(ns!=null)ns.release();if(agc!=null)agc.release();
+                if(input!=null)input.close();c.mic=null;
             }
         },"classlive-microphone").start();
     }
@@ -306,17 +297,27 @@ public class MainActivity extends Activity {
         form.addView(text("语音识别模型（默认英文模型）",12,muted));Spinner sp=new Spinner(this);String[] options={"universal-streaming-english","universal-3-6-pro"};
         ArrayAdapter<String> adapter=new ArrayAdapter<String>(this,android.R.layout.simple_spinner_item,options){@Override public View getView(int position,View old,android.view.ViewGroup parent){TextView v=(TextView)super.getView(position,old,parent);v.setTextColor(white);v.setTextSize(13);return v;}};
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);sp.setAdapter(adapter);sp.setSelection(speechModel.equals(options[1])?1:0);form.addView(sp);
-        Switch gain=new Switch(this);gain.setText("温和音量优化（最多提升 6 dB）");gain.setTextColor(white);gain.setTextSize(13);gain.setChecked(enhance);form.addView(gain);
-        form.addView(text("仅在近期识别到讲话且高于背景时补偿；关闭后不做软件增益调整，仍显示收音提示。",11,muted));
+        Switch gain=new Switch(this);gain.setText("本地自动音量优化（最多提升 12 dB）");gain.setTextColor(white);gain.setTextSize(13);gain.setChecked(enhance);form.addView(gain);
+        form.addView(text("在本地判断疑似讲话并补偿轻声，不必等待识别文字。突然大声时限制增益；关闭后保留原始音频。",11,muted));
+        form.addView(text("麦克风输入模式",12,muted));Spinner input=new Spinner(this);
+        String[] micOptions={"自动（推荐）","标准麦克风（尝试系统处理）","语音识别输入（较少系统处理）"};
+        ArrayAdapter<String> micAdapter=new ArrayAdapter<String>(this,android.R.layout.simple_spinner_item,micOptions){@Override public View getView(int position,View old,android.view.ViewGroup parent){TextView v=(TextView)super.getView(position,old,parent);v.setTextColor(white);v.setTextSize(13);return v;}};
+        micAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);input.setAdapter(micAdapter);input.setSelection(micMode);form.addView(input);
+        form.addView(text("不同手机效果不同。持续听不清时可暂停，切换模式比较；不支持时回退到另一模式，实际使用的模式显示在收音状态下方。",11,muted));
         Switch ns=new Switch(this);ns.setText("系统轻降噪（可选，默认关闭）");ns.setTextColor(white);ns.setTextSize(13);ns.setChecked(lightNoise);form.addView(ns);
         form.addView(text("取决于手机支持。若感觉吞字，请关闭。不会自动更换 API 模型。",11,muted));
+        Button test=button("本地收音测试（15 秒，不调用 API）");form.addView(test);
+        test.setOnClickListener(v->startActivity(new Intent(this,AudioCheckActivity.class)
+            .putExtra("micMode",input.getSelectedItemPosition()).putExtra("enhance",gain.isChecked()).putExtra("lightNoise",ns.isChecked())));
+        form.addView(text("使用上方当前选项测试。可分别回听原声与处理后声音，音频仅临时保存在内存；满意后返回这里点击保存。",11,muted));
         EditText gl=field(form,"课程术语（用于中文翻译）",glossary,false,true);ScrollView wrapper=new ScrollView(this);wrapper.addView(form);
         AlertDialog dialog=new AlertDialog.Builder(this).setTitle("API 与收音设置").setView(wrapper).setNegativeButton("取消",null).setPositiveButton("保存",null).create();
         dialog.setOnShowListener(d->dialog.getButton(-1).setOnClickListener(v->{
             try {String a=ak.getText().toString().trim(),k=dk.getText().toString().trim(),m=md.getText().toString().trim();if(a.isEmpty()||k.isEmpty()||m.isEmpty()){toast("请填写两项密钥和模型名称。");return;}
                 vault.put("assembly",a);vault.put("deepseek",k);asrKey=a;deepKey=k;model=m;speechModel=options[sp.getSelectedItemPosition()];glossary=gl.getText().toString();enhance=gain.isChecked();lightNoise=ns.isChecked();
-                prefs.edit().putString("model",model).putString("speechModel",speechModel).putString("glossary",glossary).putBoolean("enhance",enhance).putBoolean("lightNoise",lightNoise).apply();
-                quality.setText(enhance?"温和音量优化已开启":"软件增益关闭 · 收音监测开启");dialog.dismiss();toast("设置已保存。");
+                micMode=input.getSelectedItemPosition();
+                prefs.edit().putString("model",model).putString("speechModel",speechModel).putString("glossary",glossary).putBoolean("enhance",enhance).putBoolean("lightNoise",lightNoise).putInt("micMode",micMode).apply();
+                quality.setText(enhance?"本地音量优化已开启":"软件增益关闭 · 收音监测开启");dialog.dismiss();toast("设置已保存。");
             }catch(Exception e){toast("密钥加密保存失败，请重试。");}
         }));dialog.show();
     }

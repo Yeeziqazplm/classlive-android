@@ -3,9 +3,14 @@ from pathlib import Path
 import subprocess, tempfile, urllib.request, os
 root=Path(__file__).resolve().parent
 java=root/'app/src/main/java/com/yeezi/classlive'
-android=root/'.build-cache/platforms/android-35/android.jar'
+cache=Path(os.environ.get('CLASSLIVE_BUILD_CACHE',str(root/'.build-cache')))
+android=cache/'platforms/android-35/android.jar'
+if not android.exists():
+    sdk=os.environ.get('ANDROID_HOME') or os.environ.get('ANDROID_SDK_ROOT')
+    if sdk:android=Path(sdk)/'platforms/android-35/android.jar'
 if not android.exists():raise SystemExit('Run python3 build_apk.py first to obtain android.jar')
-jar=root/'.build-cache/test-json.jar'
+jar=cache/'test-json.jar'
+cache.mkdir(parents=True,exist_ok=True)
 if not jar.exists():urllib.request.urlretrieve('https://repo.maven.apache.org/maven2/org/json/json/20240303/json-20240303.jar',jar)
 with tempfile.TemporaryDirectory() as d:
     deps=os.pathsep.join(map(str,[jar,android]))

@@ -15,5 +15,6 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with: { gradle-version: '8.9' }
       - run: gradle :app:assembleDebug :app:lintDebug
+      - run: python3 test_core.py
       - uses: actions/upload-artifact@v4
         with: { name: ClassLive-APK, path: app/build/outputs/apk/debug/app-debug.apk }
