@@ -8,7 +8,6 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.media.*;
-import android.media.audiofx.*;
 import android.os.*;
 import android.view.*;
 import android.widget.*;
@@ -17,24 +16,25 @@ import java.io.*;
 import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicBoolean;
 import okhttp3.*;
-import okio.ByteString;
 
 public class MainActivity extends Activity {
     private final int bg=Color.rgb(12,18,32),panel=Color.rgb(24,34,51),mint=Color.rgb(117,224,192),white=Color.rgb(239,244,250),muted=Color.rgb(161,177,195),amber=Color.rgb(255,203,120);
     private final Handler main=new Handler(Looper.getMainLooper());
     private final OkHttpClient http=new OkHttpClient.Builder().connectTimeout(12,TimeUnit.SECONDS).readTimeout(30,TimeUnit.SECONDS).callTimeout(40,TimeUnit.SECONDS).build();
-    private final OkHttpClient socketHttp=new OkHttpClient.Builder().connectTimeout(12,TimeUnit.SECONDS).readTimeout(0,TimeUnit.MILLISECONDS).pingInterval(15,TimeUnit.SECONDS).build();
     private final ThreadPoolExecutor translators=new ThreadPoolExecutor(2,2,0,TimeUnit.SECONDS,new ArrayBlockingQueue<Runnable>(60));
     private final ExecutorService files=Executors.newSingleThreadExecutor();
     private final Map<String,Lecture> loaded=new HashMap<>();
     private final LinkedHashMap<String,Card> cards=new LinkedHashMap<>();
     private SharedPreferences prefs;private KeyVault vault;private LectureStore store;private Lecture current;
     private LinearLayout list;private ScrollView scroll;private TextView status,title,partial,quality,details,counts;private Button start;private Switch follow;
-    private boolean visible,closing,destroyed,permissionStart,saveError,exporting;
+    private boolean visible,closing,permissionStart,saveError,exporting;
+    private volatile boolean destroyed;
     private Capture capture;private Runnable afterStop;
-    private String asrKey="",deepKey="",model="deepseek-flash",speechModel="universal-streaming-english";
+    private boolean installingModel;
+    private volatile Call modelDownload;
+    private Thread modelInstaller;
+    private String deepKey="",model="deepseek-flash";
     private String glossary="HUD=抬头显示; UI=用户界面; UX=用户体验; level design=关卡设计; mission design=任务设计; affordance=可供性; blockout=关卡白盒; greybox=灰盒; diegetic=叙事内";
     private boolean enhance=true,lightNoise=false;
     private int micMode=0; // 0: auto, 1: MIC first, 2: VOICE_RECOGNITION first
@@ -42,12 +42,12 @@ public class MainActivity extends Activity {
     private static final class Card {LinearLayout root;TextView output;Button retry;}
     private static final class Capture {
         final Lecture lecture;final AudioProcessor processor=new AudioProcessor();
-        final Set<Integer> finalized=new HashSet<>();final AtomicBoolean terminated=new AtomicBoolean();
-        volatile boolean active=true,threadStarted=false;boolean accepting=true,begun=false;
-        volatile AudioRecord mic;WebSocket socket;volatile long startedMs,stoppedMs;long lastCheckpoint,lastDraftSave;
-        String effectNote="";int partialOrder=-1;
+        final ArrayBlockingQueue<OfflineSegments.Block> blocks=new ArrayBlockingQueue<>(6);
+        volatile boolean active=true,micDone=false;boolean accepting=true;
+        volatile AudioRecord mic;volatile long startedMs,stoppedMs,lastCheckpoint;
+        volatile String issue="";
+        String effectNote="";
         Capture(Lecture l){lecture=l;}
-        void terminate(){if(socket!=null&&terminated.compareAndSet(false,true)){socket.send("{\"type\":\"ForceEndpoint\"}");socket.send("{\"type\":\"Terminate\"}");}}
     }
     private int dp(int n){return (int)(getResources().getDisplayMetrics().density*n+.5f);}
     private TextView text(String s,int size,int color){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(color);return t;}
@@ -60,8 +60,8 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state){
         super.onCreate(state);prefs=getSharedPreferences("settings",0);vault=new KeyVault(this);
-        try{asrKey=vault.get("assembly");deepKey=vault.get("deepseek");}catch(Exception e){toast("请在设置中重新填写 API 密钥。");}
-        model=prefs.getString("model",model);speechModel=prefs.getString("speechModel",speechModel);glossary=prefs.getString("glossary",glossary);
+        try{deepKey=vault.get("deepseek");}catch(Exception e){toast("请在设置中重新填写 API 密钥。");}
+        model=prefs.getString("model",model);glossary=prefs.getString("glossary",glossary);
         enhance=prefs.getBoolean("enhance",true);lightNoise=prefs.getBoolean("lightNoise",false);
         micMode=Math.max(0,Math.min(2,prefs.getInt("micMode",0)));
         buildUi();
@@ -82,7 +82,7 @@ public class MainActivity extends Activity {
     private void buildUi(){
         LinearLayout root=column();root.setBackgroundColor(bg);
         root.setOnApplyWindowInsetsListener((v,i)->{root.setPadding(dp(16)+i.getSystemWindowInsetLeft(),dp(8)+i.getSystemWindowInsetTop(),dp(16)+i.getSystemWindowInsetRight(),dp(8)+i.getSystemWindowInsetBottom());return i.consumeSystemWindowInsets();});
-        TextView brand=text("CLASSLIVE  /  课堂翻译  0.3",12,mint);brand.setLetterSpacing(.12f);root.addView(brand);
+        TextView brand=text("CLASSLIVE  /  离线实验  0.4",12,mint);brand.setLetterSpacing(.12f);root.addView(brand);
         title=text("课堂记录",23,white);title.setTypeface(null,Typeface.BOLD);title.setPadding(0,dp(7),0,dp(3));root.addView(title);title.setOnClickListener(v->rename());
         status=text("准备就绪 · 点击课程名可修改",12,muted);root.addView(status);
         LinearLayout tools=new LinearLayout(this);Button config=button("设置"),history=button("课堂记录"),export=button("生成 TXT");
@@ -103,7 +103,9 @@ public class MainActivity extends Activity {
     @Override protected void onPause(){visible=false;if(capture!=null&&capture.active)stopCapture("已暂停 · 返回页面后可继续");super.onPause();}
     @Override protected void onDestroy(){
         destroyed=true;afterStop=null;
-        if(capture!=null){Capture c=capture;c.active=false;c.stoppedMs=SystemClock.elapsedRealtime();c.accepting=false;stopMic(c);c.terminate();account(c);recoverDraft(c.lecture);persist(c.lecture);if(c.socket!=null)main.postDelayed(c.socket::cancel,1000);}
+        if(capture!=null){Capture c=capture;c.active=false;if(c.stoppedMs==0)c.stoppedMs=SystemClock.elapsedRealtime();c.accepting=false;c.blocks.clear();stopMic(c);account(c);recoverDraft(c.lecture);persist(c.lecture);}
+        Call download=modelDownload;if(download!=null)download.cancel();
+        if(modelInstaller!=null)modelInstaller.interrupt();
         translators.shutdownNow();http.dispatcher().cancelAll();files.shutdown();if(store!=null)store.shutdown();super.onDestroy();
     }
     private Lecture fresh(String name){return new Lecture(UUID.randomUUID().toString(),name,System.currentTimeMillis());}
@@ -161,93 +163,117 @@ public class MainActivity extends Activity {
         });});
     }
     private void begin(){
-        if(destroyed||current==null||store==null||busy())return;
-        if(asrKey.isEmpty()||deepKey.isEmpty()){settings();return;}
+        if(destroyed||!visible||current==null||store==null||busy())return;
+        if(installingModel){toast("模型正在准备，请稍候。");return;}
+        if(!OfflineModel.installed(this)){modelOptions();return;}
         if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},7);return;}
-        Capture c=new Capture(current);capture=c;start.setText("暂停听课");status.setText("连接语音识别服务…");quality.setText("正在连接…");quality.setTextColor(mint);saveError=false;
+        Capture c=new Capture(current);capture=c;start.setText("取消");status.setText("正在加载本地 Parakeet…");quality.setText("音频在本机识别");quality.setTextColor(mint);saveError=false;
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        String url="https://streaming.assemblyai.com/v3/ws?sample_rate=16000&encoding=pcm_s16le&speech_model="+speechModel;
-        if(speechModel.equals("universal-streaming-english"))url+="&format_turns=false&max_turn_silence=1000";
-        c.socket=socketHttp.newWebSocket(new Request.Builder().url(url).header("Authorization",asrKey).build(),new WebSocketListener(){
-            @Override public void onMessage(WebSocket socket,String message){main.post(()->handleMessage(c,message));}
-            @Override public void onFailure(WebSocket socket,Throwable t,Response response){main.post(()->{if(capture!=c||!c.accepting||destroyed)return;
-                int code=response==null?0:response.code();String reason=code==401||code==403?"语音密钥无效或账户无权限":code==402?"语音账户余额不足":code==400?"语音连接参数未被接受，请检查模型设置":"语音连接中断 · 检查网络、密钥与余额后继续";
-                stopCapture(reason);finishCapture(c);
-            });}
-            @Override public void onClosed(WebSocket socket,int code,String reason){main.post(()->{if(capture==c&&c.accepting&&!destroyed){if(c.active)stopCapture("语音会话已结束，请点击继续听课");finishCapture(c);}});}
+        new Thread(()->runOffline(c),"classlive-local-asr").start();
+    }
+    private void runOffline(Capture c){
+        OfflineSegments.Stitcher stitcher=new OfflineSegments.Stitcher();
+        try(OfflineAsr recognizer=new OfflineAsr(OfflineModel.file(this))){
+            main.post(()->{
+                if(capture!=c||!c.active||destroyed){c.micDone=true;return;}
+                start.setText("暂停听课");
+                status.setText(deepKey.isEmpty()?"本地英文转写 · 无需联网":"本地英文转写 · 中文联网翻译");
+                partial.setText("正在听课 · 英文分段显示");
+                startMic(c);
+            });
+            while(!destroyed&&(c.active||!c.micDone||!c.blocks.isEmpty())){
+                OfflineSegments.Block block=c.blocks.poll(100,TimeUnit.MILLISECONDS);
+                if(block==null)continue;
+                String line=stitcher.accept(block,recognizer.decode(block.pcm)).trim();
+                postLocalLine(c,line);
+            }
+            postLocalLine(c,stitcher.finish());
+        }catch(UnsatisfiedLinkError e){
+            c.issue="本地引擎无法启动 · 请使用 arm64 安卓设备";
+        }catch(Exception e){
+            if(!destroyed)c.issue="本地识别中断 · 已保留文字，可重新开始";
+        }finally{
+            c.active=false;stopMic(c);
+            main.post(()->{if(capture==c&&!destroyed){
+                if(!c.issue.isEmpty())status.setText(c.issue);
+                finishCapture(c);
+            }});
+        }
+    }
+    private void postLocalLine(Capture c,String text){
+        if(text.isEmpty()||destroyed)return;
+        main.post(()->{if(capture!=c||!c.accepting||destroyed)return;
+            account(c);append(c.lecture,new Lecture.Line(UUID.randomUUID().toString(),text,clock(),false,false),!deepKey.isEmpty());
+            if(c.active)partial.setText("正在听课 · 等待下一段英文");
         });
-        main.postDelayed(()->{if(capture==c&&c.active&&!c.begun)stopCapture("连接超时，请检查网络和 API 设置");},18000);
     }
     @Override public void onRequestPermissionsResult(int request,String[] names,int[] grant){
         super.onRequestPermissionsResult(request,names,grant);
         if(request==7){if(grant.length>0&&grant[0]==PackageManager.PERMISSION_GRANTED){if(visible)begin();else permissionStart=true;}else toast("需要麦克风权限，可在手机应用权限设置中开启。");}
     }
-    private void handleMessage(Capture c,String message){
-        if(capture!=c||!c.accepting||destroyed)return;
-        try {
-            JSONObject m=new JSONObject(message);String type=m.optString("type");
-            if(type.equals("Begin")){
-                if(!c.active||c.begun)return;c.begun=true;status.setText("正在听课 · 英文实时显示 / 中文逐句翻译");startMic(c);
-            }else if(type.equals("Turn")){
-                String en=m.optString("transcript").trim();if(en.isEmpty())return;int order=m.optInt("turn_order",-1);if(order<0)throw new JSONException("turn order");
-                if(c.finalized.contains(order))return;
-                if(m.optBoolean("end_of_turn")){
-                    c.finalized.add(order);JSONArray words=m.optJSONArray("words");double sum=0;int count=0;
-                    if(words!=null)for(int i=0;i<words.length();i++){double v=words.getJSONObject(i).optDouble("confidence",Double.NaN);if(!Double.isNaN(v)){sum+=v;count++;}}
-                    boolean uncertain=count>=3&&sum/count<.65;
-                    if(c.partialOrder<=order){c.lecture.draft="";c.lecture.draftTime="";partial.setText(c.active?"等待下一句…":"收音已暂停");}
-                    account(c);append(c.lecture,new Lecture.Line(UUID.randomUUID().toString(),en,clock(),false,uncertain),true);
-                }else {
-                    c.partialOrder=order;c.lecture.draft=en;c.lecture.draftTime=clock();partial.setText(en);
-                    long now=SystemClock.elapsedRealtime();if(now-c.lastDraftSave>=1000){account(c);persist(c.lecture);c.lastDraftSave=now;}
-                }
-            }else if(type.equals("Termination")){
-                if(c.active)stopCapture("语音会话已结束，请点击继续听课");c.socket.close(1000,"complete");finishCapture(c);
-            }else if(type.equals("Error")||m.has("error")){
-                stopCapture("语音服务出错 · 检查密钥、余额和模型设置");finishCapture(c);
-            }
-        }catch(Exception e){stopCapture("语音返回格式异常，已保留现有文字");finishCapture(c);}
-    }
     private void startMic(Capture c){
-        c.threadStarted=true;final boolean adaptive=enhance,nsRequested=lightNoise;final int selectedMicMode=micMode;
-        new Thread(()->{AudioRecord mic=null;MicrophoneInput input=null;boolean software=adaptive;byte[] chunk=new byte[3200];int filled=0;
-            try {
+        final boolean adaptive=enhance,nsRequested=lightNoise;final int selectedMicMode=micMode;
+        new Thread(()->{
+            byte[] chunk=new byte[3200];int filled=0,packets=0;
+            OfflineSegments segments=new OfflineSegments();
+            try{
                 if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)
                     throw new SecurityException("microphone permission revoked");
-                input=MicrophoneInput.open(this,selectedMicMode,adaptive,nsRequested);
-                mic=input.recorder;software=input.softwareEnhancement;c.effectNote=input.description;
-                if(!c.active)return;c.mic=mic;mic.startRecording();c.startedMs=SystemClock.elapsedRealtime();c.lastCheckpoint=c.startedMs;
-                long forced=c.startedMs;int packets=0;
-                while(c.active){int n=mic.read(chunk,filled,chunk.length-filled);if(n<0){if(!c.active)break;throw new IOException("microphone read");}if(n==0)continue;filled+=n;
-                    if(filled==chunk.length){long now=SystemClock.elapsedRealtime();AudioProcessor.Metrics measurement=c.processor.process(chunk,filled,software,now);
-                        if(c.socket.queueSize()>160000||!c.socket.send(ByteString.of(chunk)))throw new IOException("upload backlog");filled=0;
-                        if(++packets%3==0)main.post(()->{if(capture!=c||!c.active||destroyed)return;quality.setText(measurement.state);quality.setTextColor(measurement.warning?amber:mint);
-                            details.setText(String.format(Locale.UK,"原始 %.0f → 输出 %.0f dBFS · 增益 %+.1f dB\n%d 分 %d 秒 · %s",measurement.rmsDb,measurement.outputDb,measurement.gainDb,(now-c.startedMs)/60000,(now-c.startedMs)/1000%60,c.effectNote));
+                try(MicrophoneInput input=MicrophoneInput.open(this,selectedMicMode,adaptive,nsRequested)){
+                    if(!c.active)return;
+                    AudioRecord mic=input.recorder;c.mic=mic;c.effectNote=input.description;
+                    mic.startRecording();c.startedMs=SystemClock.elapsedRealtime();c.lastCheckpoint=c.startedMs;
+                    while(c.active){
+                        int n=mic.read(chunk,filled,chunk.length-filled);
+                        if(n<0){if(!c.active)break;throw new IOException("microphone read");}
+                        if(n==0)continue;
+                        filled+=n;
+                        if(filled!=chunk.length)continue;
+                        long now=SystemClock.elapsedRealtime();
+                        AudioProcessor.Metrics m=c.processor.process(chunk,filled,input.softwareEnhancement,now);
+                        // Quiet is only a hint for where to split; every frame stays in the audio.
+                        OfflineSegments.Block block=segments.add(chunk,filled,!m.speech&&m.rmsDb<Math.max(-48,m.noiseDb+3));
+                        filled=0;
+                        if(!queueLocalBlock(c,block))break;
+                        if(++packets%3==0)main.post(()->{if(capture!=c||!c.active||destroyed)return;
+                            quality.setText(m.state);quality.setTextColor(m.warning?amber:mint);
+                            details.setText(String.format(Locale.UK,"原始 %.0f → 输出 %.0f dBFS · 增益 %+.1f dB\n本地待处理 %d 段 · %s",m.rmsDb,m.outputDb,m.gainDb,c.blocks.size(),c.effectNote));
                             if(now-c.lastCheckpoint>5000){account(c);persist(c.lecture);}
                         });
-                        if(now-forced>=10000){c.socket.send("{\"type\":\"ForceEndpoint\"}");forced=now;}
+                    }
+                    if(filled>=2&&!destroyed&&c.issue.isEmpty()){
+                        int length=filled&~1;
+                        c.processor.process(chunk,length,input.softwareEnhancement,SystemClock.elapsedRealtime());
+                        queueLocalBlock(c,segments.add(chunk,length,false));
                     }
                 }
-            }catch(SecurityException e){main.post(()->{if(capture==c&&c.active&&!destroyed)stopCapture("麦克风权限不可用 · 请在系统设置中允许后继续");});}
-            catch(Exception e){main.post(()->{if(capture==c&&c.active&&!destroyed)stopCapture("收音或上传中断 · 检查麦克风占用与网络后继续");});}
-            finally {
-                if(filled>0&&c.socket!=null&&!c.terminated.get()){
-                    try{Arrays.fill(chunk,filled,chunk.length,(byte)0);c.processor.process(chunk,chunk.length,software,SystemClock.elapsedRealtime());if(c.socket.queueSize()<=160000)c.socket.send(ByteString.of(chunk));}catch(Exception ignored){}
-                }
-                c.terminate();
-                if(input!=null)input.close();c.mic=null;
+            }catch(SecurityException e){c.issue="麦克风权限不可用 · 请在系统设置中允许后继续";}
+            catch(Exception e){if(c.active)c.issue="收音中断 · 检查麦克风占用后重试";}
+            finally{
+                c.mic=null;
+                if(!destroyed&&c.issue.isEmpty())queueLocalBlock(c,segments.flush());
+                if(c.stoppedMs==0)c.stoppedMs=SystemClock.elapsedRealtime();
+                c.active=false;c.micDone=true;
+                if(!c.issue.isEmpty())main.post(()->{if(capture==c&&!destroyed)stopCapture(c.issue+" · 正在处理已排队音频");});
             }
         },"classlive-microphone").start();
+    }
+    private boolean queueLocalBlock(Capture c,OfflineSegments.Block block){
+        if(block==null)return true;
+        if(destroyed)return false;
+        if(c.blocks.offer(block))return true;
+        c.issue="本地识别跟不上 · 已暂停，最后一段未能识别";
+        return false;
     }
     private void stopMic(Capture c){AudioRecord mic=c.mic;if(mic!=null)try{mic.stop();}catch(Exception ignored){}}
     private void stopCapture(String reason){
         Capture c=capture;if(c==null){runAfterStop();return;}if(closing)return;
         c.active=false;c.stoppedMs=SystemClock.elapsedRealtime();closing=true;start.setEnabled(false);start.setText("正在结束收音…");status.setText(reason);getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        account(c);persist(c.lecture);stopMic(c);if(!c.threadStarted)c.terminate();
-        main.postDelayed(()->{if(capture==c&&c.accepting){if(c.socket!=null)c.socket.cancel();finishCapture(c);}},3500);
+        account(c);persist(c.lecture);stopMic(c);
+        if(!c.micDone)partial.setText("正在处理最后一段英文…");
     }
     private void finishCapture(Capture c){
-        if(!c.accepting)return;c.accepting=false;c.active=false;if(c.stoppedMs==0)c.stoppedMs=SystemClock.elapsedRealtime();stopMic(c);c.terminate();account(c);
+        if(!c.accepting)return;c.accepting=false;c.active=false;if(c.stoppedMs==0)c.stoppedMs=SystemClock.elapsedRealtime();stopMic(c);account(c);
         if(!c.lecture.draft.isEmpty()){
             Lecture.Line r=new Lecture.Line(UUID.randomUUID().toString(),c.lecture.draft,c.lecture.draftTime,true,false);c.lecture.draft="";c.lecture.draftTime="";append(c.lecture,r,true);
         }
@@ -292,11 +318,10 @@ public class MainActivity extends Activity {
     }
     private void settings(){
         LinearLayout form=column();form.setPadding(dp(16),dp(12),dp(16),dp(12));form.setBackgroundColor(bg);
-        form.addView(text("密钥在本机加密保存。音频发往 AssemblyAI；英文、最近三句英文上下文及术语表发往 DeepSeek。两项 API 分别计费。",12,muted));
-        EditText ak=field(form,"AssemblyAI API Key",asrKey,true,false),dk=field(form,"DeepSeek API Key",deepKey,true,false),md=field(form,"DeepSeek 模型",model,false,false);
-        form.addView(text("语音识别模型（默认英文模型）",12,muted));Spinner sp=new Spinner(this);String[] options={"universal-streaming-english","universal-3-6-pro"};
-        ArrayAdapter<String> adapter=new ArrayAdapter<String>(this,android.R.layout.simple_spinner_item,options){@Override public View getView(int position,View old,android.view.ViewGroup parent){TextView v=(TextView)super.getView(position,old,parent);v.setTextColor(white);v.setTextSize(13);return v;}};
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);sp.setAdapter(adapter);sp.setSelection(speechModel.equals(options[1])?1:0);form.addView(sp);
+        form.addView(text("英文转写在本机完成，无需填 AssemblyAI 密钥。若填写 DeepSeek 密钥，英文、最近三段英文上下文及术语表将发送给 DeepSeek 翻译。留空只做英文转写。",12,muted));
+        Button modelSetup=button(OfflineModel.installed(this)?"查看本地模型":"准备本地模型（477 MB）");
+        form.addView(modelSetup);modelSetup.setOnClickListener(v->modelOptions());
+        EditText dk=field(form,"DeepSeek API Key（可留空）",deepKey,true,false),md=field(form,"DeepSeek 模型",model,false,false);
         Switch gain=new Switch(this);gain.setText("本地自动音量优化（最多提升 12 dB）");gain.setTextColor(white);gain.setTextSize(13);gain.setChecked(enhance);form.addView(gain);
         form.addView(text("在本地判断疑似讲话并补偿轻声，不必等待识别文字。突然大声时限制增益；关闭后保留原始音频。",11,muted));
         form.addView(text("麦克风输入模式",12,muted));Spinner input=new Spinner(this);
@@ -313,13 +338,67 @@ public class MainActivity extends Activity {
         EditText gl=field(form,"课程术语（用于中文翻译）",glossary,false,true);ScrollView wrapper=new ScrollView(this);wrapper.addView(form);
         AlertDialog dialog=new AlertDialog.Builder(this).setTitle("API 与收音设置").setView(wrapper).setNegativeButton("取消",null).setPositiveButton("保存",null).create();
         dialog.setOnShowListener(d->dialog.getButton(-1).setOnClickListener(v->{
-            try {String a=ak.getText().toString().trim(),k=dk.getText().toString().trim(),m=md.getText().toString().trim();if(a.isEmpty()||k.isEmpty()||m.isEmpty()){toast("请填写两项密钥和模型名称。");return;}
-                vault.put("assembly",a);vault.put("deepseek",k);asrKey=a;deepKey=k;model=m;speechModel=options[sp.getSelectedItemPosition()];glossary=gl.getText().toString();enhance=gain.isChecked();lightNoise=ns.isChecked();
+            try {String k=dk.getText().toString().trim(),m=md.getText().toString().trim();if(!k.isEmpty()&&m.isEmpty()){toast("请填写翻译模型名称。");return;}
+                if(!k.equals(deepKey))vault.put("deepseek",k);deepKey=k;if(!m.isEmpty())model=m;glossary=gl.getText().toString();enhance=gain.isChecked();lightNoise=ns.isChecked();
                 micMode=input.getSelectedItemPosition();
-                prefs.edit().putString("model",model).putString("speechModel",speechModel).putString("glossary",glossary).putBoolean("enhance",enhance).putBoolean("lightNoise",lightNoise).putInt("micMode",micMode).apply();
+                prefs.edit().putString("model",model).putString("glossary",glossary).putBoolean("enhance",enhance).putBoolean("lightNoise",lightNoise).putInt("micMode",micMode).apply();
                 quality.setText(enhance?"本地音量优化已开启":"软件增益关闭 · 收音监测开启");dialog.dismiss();toast("设置已保存。");
             }catch(Exception e){toast("密钥加密保存失败，请重试。");}
         }));dialog.show();
+    }
+    private void modelOptions(){
+        if(installingModel){toast("模型正在准备，请稍候。");return;}
+        if(busy()){toast("请先暂停听课。");return;}
+        if(OfflineModel.installed(this)){new AlertDialog.Builder(this).setTitle("本地模型已就绪")
+                .setMessage("Parakeet Unified English Q4 · 477 MB。可以在断网时做英文转写。")
+                .setPositiveButton("关闭",null).show();return;}
+        new AlertDialog.Builder(this).setTitle("准备本地英文模型")
+                .setMessage("首次需要 Parakeet Unified English Q4（477 MB），建议使用 Wi-Fi。下载或导入后，英文转写不需要上网。")
+                .setPositiveButton("下载模型",(d,w)->installModel(null))
+                .setNeutralButton("导入 GGUF",(d,w)->{
+                    Intent pick=new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*");
+                    try{startActivityForResult(pick,9);}catch(ActivityNotFoundException e){toast("未找到文件选择器");}
+                }).setNegativeButton("取消",null).show();
+    }
+    private void installModel(android.net.Uri uri){
+        if(installingModel||busy())return;
+        if(getFilesDir().getUsableSpace()<OfflineModel.SIZE+32*1024*1024){toast("请留出至少 510 MB 手机存储空间");return;}
+        installingModel=true;start.setEnabled(false);
+        ProgressDialog progress=new ProgressDialog(this);
+        progress.setTitle(uri==null?"下载本地模型":"导入本地模型");
+        progress.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);progress.setMax(100);
+        progress.setCancelable(false);
+        progress.setButton(DialogInterface.BUTTON_NEGATIVE,"取消",(d,w)->{
+            Call call=modelDownload;if(call!=null)call.cancel();if(modelInstaller!=null)modelInstaller.interrupt();
+        });
+        progress.show();
+        modelInstaller=new Thread(()->{
+            String message;
+            try{
+                OfflineModel.Progress update=percent->main.post(()->{if(!destroyed)progress.setProgress(percent);});
+                if(uri!=null){
+                    try(InputStream source=getContentResolver().openInputStream(uri)){
+                        if(source==null)throw new IOException("无法打开所选文件");
+                        OfflineModel.install(OfflineModel.file(this),source,update);
+                    }
+                }else{
+                    Call call=http.newBuilder().callTimeout(0,TimeUnit.MILLISECONDS).build()
+                        .newCall(new Request.Builder().url(OfflineModel.URL).build());
+                    modelDownload=call;
+                    if(Thread.currentThread().isInterrupted())call.cancel();
+                    try(Response response=call.execute()){
+                        if(!response.isSuccessful()||response.body()==null)throw new IOException("无法从模型站下载，请改用文件导入");
+                        OfflineModel.install(OfflineModel.file(this),response.body().byteStream(),update);
+                    }
+                }
+                message="模型已就绪 · 点击开始听课";
+            }catch(Exception e){
+                message=Thread.currentThread().isInterrupted()?"已取消模型准备":"模型准备失败 · 检查网络、存储空间或所选文件";
+            }finally{modelDownload=null;}
+            final String result=message;
+            main.post(()->{installingModel=false;modelInstaller=null;if(destroyed)return;progress.dismiss();start.setEnabled(true);status.setText(result);toast(result);});
+        },"classlive-model-install");
+        modelInstaller.start();
     }
     private void requestExport(){
         if(exporting){toast("正在生成 TXT，请完成当前保存。");return;}
@@ -346,7 +425,9 @@ public class MainActivity extends Activity {
         });
     }
     @Override protected void onActivityResult(int request,int result,Intent data){
-        super.onActivityResult(request,result,data);if(request!=8)return;
+        super.onActivityResult(request,result,data);
+        if(request==9){if(result==RESULT_OK&&data!=null&&data.getData()!=null)installModel(data.getData());return;}
+        if(request!=8)return;
         if(result!=RESULT_OK||data==null||data.getData()==null){exporting=false;exportCache().delete();return;}
         final android.net.Uri destination=data.getData();files.execute(()->{
             try(InputStream in=new FileInputStream(exportCache());OutputStream out=getContentResolver().openOutputStream(destination,"wt")){

@@ -12,3 +12,5 @@ __pycache__/
 .env
 .env.*
 ClassLive-build-checkpoint.zip
+
+app/src/main/jniLibs/

@@ -7,6 +7,7 @@ import os, re, shutil, subprocess, urllib.request, zipfile, xml.etree.ElementTre
 ROOT=Path(__file__).resolve().parent
 CACHE=Path(os.environ.get('CLASSLIVE_BUILD_CACHE',str(ROOT/'.build-cache'))); CACHE.mkdir(exist_ok=True)
 config=(ROOT/'app/build.gradle').read_text()
+APPLICATION_ID=re.search(r"applicationId\s+'([^']+)'",config).group(1)
 VERSION_CODE=re.search(r'versionCode\s+(\d+)',config).group(1)
 VERSION_NAME=re.search(r"versionName\s+'([0-9.]+)'",config).group(1)
 urls={
@@ -17,6 +18,8 @@ urls={
 }
 def run(*args): subprocess.run([str(a) for a in args],check=True,cwd=ROOT)
 def build():
+ native=Path(os.environ.get('CLASSLIVE_NATIVE_LIB',str(ROOT/'app/src/main/jniLibs/arm64-v8a/libclasslive_asr.so')))
+ if not native.is_file(): raise SystemExit('Build the arm64 native engine first (see README.md)')
  if not shutil.which('java'): raise SystemExit('Java 17+ required')
  for name,url in urls.items():
   p=CACHE/name
@@ -30,9 +33,9 @@ def build():
  tools=CACHE/'tools/android-15'; android=CACHE/'platforms/android-35/android.jar'
  for exe in ['aapt2','zipalign']: (tools/exe).chmod(0o755)
  output=ROOT/'build-local';shutil.rmtree(output,ignore_errors=True);output.mkdir();(output/'classes').mkdir();(output/'dex').mkdir()
- manifest=ET.parse(ROOT/'app/src/main/AndroidManifest.xml');manifest.getroot().set('package','com.yeezi.classlive');manifest.write(output/'AndroidManifest.xml',encoding='utf-8')
+ manifest=ET.parse(ROOT/'app/src/main/AndroidManifest.xml');manifest.getroot().set('package',APPLICATION_ID);manifest.write(output/'AndroidManifest.xml',encoding='utf-8')
  run(tools/'aapt2','compile','--dir',ROOT/'app/src/main/res','-o',output/'res.zip')
- run(tools/'aapt2','link','-I',android,'--manifest',output/'AndroidManifest.xml','--min-sdk-version','26','--target-sdk-version','35','--version-code',VERSION_CODE,'--version-name',VERSION_NAME,'-o',output/'base.apk',output/'res.zip')
+ run(tools/'aapt2','link','-I',android,'--manifest',output/'AndroidManifest.xml','--min-sdk-version','26','--target-sdk-version','35','-A',ROOT/'app/src/main/assets','--version-code',VERSION_CODE,'--version-name',VERSION_NAME,'-o',output/'base.apk',output/'res.zip')
  javafiles=list((ROOT/'app/src/main/java').rglob('*.java'))
  run('java','-m','jdk.compiler/com.sun.tools.javac.Main','-source','8','-target','8','-encoding','UTF-8','-classpath',os.pathsep.join(map(str,[android,CACHE/'okhttp.jar',CACHE/'okio.jar'])),'-d',output/'classes',*javafiles)
  with zipfile.ZipFile(output/'classes.jar','w') as z:
@@ -41,11 +44,12 @@ def build():
  shutil.copyfile(output/'base.apk',output/'unsigned.apk')
  with zipfile.ZipFile(output/'unsigned.apk','a',zipfile.ZIP_DEFLATED) as z:
   for p in (output/'dex').glob('*.dex'):z.write(p,p.name)
- run(tools/'zipalign','-f','4',output/'unsigned.apk',output/'aligned.apk')
+  z.write(native,'lib/arm64-v8a/libclasslive_asr.so')
+ run(tools/'zipalign','-P','16','-f','4',output/'unsigned.apk',output/'aligned.apk')
  key=CACHE/'debug.jks'
  if not key.exists():
   run('keytool','-genkeypair','-keystore',key,'-storepass','android','-keypass','android','-alias','androiddebugkey','-dname','CN=ClassLive local debug','-keyalg','RSA','-validity','10000')
- apk=ROOT.parent/f'ClassLive-{VERSION_NAME}.apk'
+ apk=ROOT.parent/f'ClassLive-Offline-{VERSION_NAME}-arm64.apk'
  signer=tools/'lib/apksigner.jar'
  run('java','-jar',signer,'sign','--ks',key,'--ks-pass','pass:android','--key-pass','pass:android','--out',apk,output/'aligned.apk')
  run('java','-jar',signer,'verify','--verbose',apk)
