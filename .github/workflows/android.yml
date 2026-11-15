@@ -19,7 +19,13 @@ jobs:
         with:
           path: ~/.android/debug.keystore
           key: classlive-v1-debug-signing
-      - run: CLASSLIVE_ANDROID_NDK="$ANDROID_HOME/ndk/28.2.13676358" bash native/build-android.sh
+      - uses: actions/cache@v4
+        id: native
+        with:
+          path: app/src/main/jniLibs
+          key: classlive-native-v1-${{ hashFiles('native/**') }}
+      - if: steps.native.outputs.cache-hit != 'true'
+        run: CLASSLIVE_ANDROID_NDK="$ANDROID_HOME/ndk/28.2.13676358" bash native/build-android.sh
       - uses: gradle/actions/setup-gradle@v4
         with: { gradle-version: '8.9' }
       - run: gradle :app:assembleDebug :app:lintDebug :app:assembleDebugAndroidTest

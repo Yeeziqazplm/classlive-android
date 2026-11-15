@@ -108,12 +108,14 @@ public class MainActivity extends Activity {
         root.addView(EndfieldUi.rule(this));LinearLayout nav=new LinearLayout(this);nav.setPadding(0,dp(6),0,dp(6));
         String[] labels={"LIVE\n听课","RECORDS\n记录","SETTINGS\n设置"};
         for(int i=0;i<3;i++){final int index=i;tabs[i]=button(labels[i]);tabs[i].setTextSize(12);LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,-2,1);if(i<2)lp.rightMargin=dp(6);nav.addView(tabs[i],lp);tabs[i].setOnClickListener(v->{if(index==0)showLive();else if(busy())toast("请先暂停听课，再打开"+(index==1?"记录":"设置"));else if(index==1)history();else settings();});}
-        root.addView(nav);setContentView(root);selectTab(0);
+        root.addView(nav);setContentView(root);selectTab(0);adaptHeight();
         follow.setOnCheckedChangeListener((v,on)->{if(on&&current!=null){windowStart=Math.max(0,current.lines.size()-100);renderRows();}});
         scroll.setOnTouchListener(new View.OnTouchListener(){float y;public boolean onTouch(View v,android.view.MotionEvent e){if(e.getActionMasked()==MotionEvent.ACTION_DOWN)y=e.getY();if(e.getActionMasked()==MotionEvent.ACTION_MOVE&&Math.abs(e.getY()-y)>dp(8)&&follow.isChecked())follow.setChecked(false);return false;}});
         list.addOnLayoutChangeListener((v,l,t,r,bt,ol,ot,or,ob)->{if(bt-t!=ob-ot)followLatest();});
         scroll.addOnLayoutChangeListener((v,l,t,r,bt,ol,ot,or,ob)->{if(bt-t!=ob-ot)followLatest();});
     }
+    private void adaptHeight(){if(live==null)return;boolean compact=getResources().getConfiguration().screenHeightDp<500;live.getChildAt(0).setVisibility(compact?View.GONE:View.VISIBLE);status.setVisibility(compact?View.GONE:View.VISIBLE);quality.setVisibility(compact?View.GONE:View.VISIBLE);partial.setMaxLines(compact?1:2);}
+    @Override public void onConfigurationChanged(android.content.res.Configuration configuration){super.onConfigurationChanged(configuration);adaptHeight();followLatest();}
     private void selectTab(int index){for(int i=0;i<3;i++){EndfieldUi.style(tabs[i],i==index,false);tabs[i].setSelected(i==index);tabs[i].setContentDescription(new String[]{"听课","记录","设置"}[i]+(i==index?"，当前页面":""));}}
     private void showLive(){page="live";pageGeneration++;while(pages.getChildCount()>1)pages.removeViewAt(1);live.setVisibility(View.VISIBLE);selectTab(0);followLatest();}
     private void showPage(String name,View view,int tab){page=name;pageGeneration++;while(pages.getChildCount()>1)pages.removeViewAt(1);live.setVisibility(View.GONE);pages.addView(view,new FrameLayout.LayoutParams(-1,-1));selectTab(tab);}

@@ -1,23 +1,50 @@
-# ClassLive 0.4.0 · 离线实验版
+# ClassLive 1.0
 
-这一分支用本地 **Parakeet Unified English 0.6B Q4_K_M** 替代 AssemblyAI。原来的 0.3.0 云端版在 main，可以和实验版同时安装。两个应用各自保存设置、密钥与课堂记录。
+Android ARM64 课堂转写与翻译工具，基于已验证的 0.4.0 Hex / Parakeet 离线测试版。
 
-- 实验版包名：`com.yeezi.classlive.offline`，适用于支持 ARMv8.2-A dot product 的 ARM64 手机（目标 vivo X300 Pro）。
-- 英文转写完全本地完成；不需要 AssemblyAI 密钥，不产生语音 API 费用。
-- 若填写 DeepSeek 密钥，英文内容会联网翻译，仍按 DeepSeek 文本用量计费。不填写即可测纯英文离线转写。
-- 实验版在自然停顿处尝试分段，最长约 8 秒强制分段并保留 1.2 秒重叠；英文按段显示，不是逐字更新。切换应用或锁屏会结束收音。
-- 只自动保存文字。TXT 由用户点击“生成 TXT”导出。
+## 本版变化
 
-## 手机测试
+- 使用 endfield-ui 重做听课、记录、设置、模型管理、收音测试、关于及操作对话框。
+- 近黑背景、深灰面板、薄荷绿操作提示；中文翻译优先阅读。
+- 修复翻译异步返回后不跟随、末句被底部听课区域挤出视野的问题。
+- 手动滑动自动关闭跟随；重新开启后返回最新字幕。
+- 听课 / 记录 / 设置三级主导航；课堂操作集中在更多菜单。
+- 四档本地模型支持下载、校验、导入、切换及删除。删除不影响课堂记录。
+- 下载失败或取消清理临时文件，已安装模型保持不变。
 
-1. 安装 `ClassLive-Offline-0.4.0-arm64.apk`，打开 **ClassLive 离线实验**。
-2. 点“开始听课”或“设置 → 准备本地模型”，在 Wi-Fi 下载 477 MB 的模型。也可以从 [模型文件](https://huggingface.co/handy-computer/parakeet-unified-en-0.6b-gguf/resolve/843b1b175ace04f5a89d379c79e2518c0d065b25/parakeet-unified-en-0.6b-Q4_K_M.gguf) 下载后，点“导入 GGUF”；两条路径验证相同的 SHA-256。
-3. 模型就绪后可以断网测试。持续说几句英语，再按暂停，检查最后一句是否出来。要看中文时，在实验版的设置中单独填写 DeepSeek 密钥。
-4. 上课建议先连续试 10–15 分钟：看漏词、术语准确性、字幕延迟、连续讲话的接缝，以及发热。“本地待处理”持续增长说明手机得加长延迟或换更轻的模型；本版队列满会暂停并提示，不悄悄覆盖前面文字。
+## 本地模型
 
-## 构建
+| 档位 | 下载大小 | 简短介绍 |
+|---|---:|---|
+| Q4_K_M | 477 MB | 推荐课堂，最小占用，延续测试版配置。 |
+| Q5_K_M | 541 MB | 均衡，量化损失更小，内存略增。 |
+| Q6_K | 602 MB | 保留更多权重精度，运行负担更高。 |
+| Q8_0 | 731 MB | 低量化损失，适合对比，占用最高。 |
 
-Linux，Java 17+（含编译器工具）、Python 3、CMake 3.18+、Android NDK r28c。运行：
+四档均为 Parakeet Unified English 0.6B，只识别英文。文件大小按十进制 MB；运行需额外内存。精度更高不保证每句话更准，也不代表更快。默认 Q4。F16/F32 和不同架构模型未纳入手机端本次支持范围。
+模型源固定在 [此版本](https://huggingface.co/handy-computer/parakeet-unified-en-0.6b-gguf/tree/843b1b175ace04f5a89d379c79e2518c0d065b25)，按每个文件的 SHA-256 完整校验。
+
+## 安装和使用
+
+1. 安装 ClassLive1.0.apk。支持 Android 8.0+，ARM64 且支持 ARMv8.2-A dot product（包括目标 vivo X300 Pro）。
+2. 设置 → 部署本地模型 → 下载或导入 Q4。可保留多个模型，随时在暂停后切换。
+3. 设置 → 中文翻译 → 填写自己的 DeepSeek 密钥；留空只做离线英文转写。
+4. 听课 → 开始听课。更多菜单提供新建课堂、改名、生成 TXT、补译及收音详情。
+5. 记录自动保存；TXT 可选双语、仅英文或仅中文。
+
+与测试版使用相同包名 com.yeezi.classlive.offline 和旧数据目录。若签名一致，可覆盖升级保留数据；不同 CI 调试签名不能覆盖。**遇到签名冲突时，先在旧版导出所需 TXT，确认备份后再卸载旧版；卸载会删除本地记录、模型和设置。** 本版未加入 TXT 导回课堂功能。
+
+## 识别与隐私
+
+保留测试版的收音增强、8 秒左右分段、1.2 秒重叠及词时间拼接；本次重点修显示与菜单，不声称改善识别准确率或断句。离开应用或锁屏暂停收音。只保存文字，不保存或上传录音。
+
+中文翻译仍调用 DeepSeek，按该账户用量收费。开启后发送目标英文、最近三段上下文和术语表。API 密钥通过 Android Keystore 加密保存。
+
+## 构建和测试
+
+GitHub Actions 使用 Java 17、Android SDK 35、Gradle 8.9、NDK r28c。运行核心测试、模型安装完整性测试、Android Lint，并在 360 / 390 / 430 dp 模拟器上检查字幕跟随、回看、删除模型、导航及截图。360 dp 同时使用 1.3 倍字体。
+
+本机 Linux 构建：
 
 ```sh
 CLASSLIVE_ANDROID_NDK=/path/to/android-ndk-r28c bash native/build-android.sh
@@ -25,6 +52,4 @@ python3 build_apk.py
 python3 test_core.py
 ```
 
-模型权重不打进 APK，也不提交 GitHub。识别引擎使用 Hex 3.4.0 实际依赖的 [transcribe.cpp 分支](https://github.com/anomalyco/transcribe.cpp/tree/bcb639faa4c74a2300ba19e30360cb2355b1663a)，手机版使用 CPU 分段推理。APK 内含依赖许可。模型按 [NVIDIA Open Model License](https://huggingface.co/handy-computer/parakeet-unified-en-0.6b-gguf/blob/843b1b175ace04f5a89d379c79e2518c0d065b25/LICENSE) 单独提供。
-
-脚本产生自签名调试 APK。由其他机器或 CI 用不同调试密钥生成的 APK，不能直接覆盖本 APK；请先导出需保留的文字。旧版云端 ClassLive 的包名不同，不受影响。
+原生引擎固定在 [transcribe.cpp bcb639f](https://github.com/anomalyco/transcribe.cpp/tree/bcb639faa4c74a2300ba19e30360cb2355b1663a)。模型权重不打进 APK。许可随包附带，可在设置 → 关于中查看。

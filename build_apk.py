@@ -49,7 +49,7 @@ def build():
  key=CACHE/'debug.jks'
  if not key.exists():
   run('keytool','-genkeypair','-keystore',key,'-storepass','android','-keypass','android','-alias','androiddebugkey','-dname','CN=ClassLive local debug','-keyalg','RSA','-validity','10000')
- apk=ROOT.parent/f'ClassLive-Offline-{VERSION_NAME}-arm64.apk'
+ apk=ROOT.parent/f'ClassLive{VERSION_NAME}.apk'
  signer=tools/'lib/apksigner.jar'
  run('java','-jar',signer,'sign','--ks',key,'--ks-pass','pass:android','--key-pass','pass:android','--out',apk,output/'aligned.apk')
  run('java','-jar',signer,'verify','--verbose',apk)
