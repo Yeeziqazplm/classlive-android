@@ -27,37 +27,38 @@ public final class AudioCheckActivity extends Activity {
         final byte[] raw=new byte[TEST_BYTES],processed=new byte[TEST_BYTES];
     }
     private int dp(int n){return (int)(getResources().getDisplayMetrics().density*n+.5f);}
-    private TextView text(String s,int size){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(Color.rgb(239,244,250));t.setPadding(0,dp(8),0,dp(8));return t;}
-    private Button button(String title,LinearLayout parent){Button b=new Button(this);b.setText(title);b.setAllCaps(false);parent.addView(b);return b;}
+    private TextView text(String s,int size){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(EndfieldUi.INK);t.setPadding(0,dp(8),0,dp(8));return t;}
+    private Button button(String title,LinearLayout parent){Button b=EndfieldUi.button(this,title);LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.topMargin=dp(10);parent.addView(b,lp);return b;}
     @Override public void onCreate(Bundle state){
         super.onCreate(state);
-        LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setBackgroundColor(Color.rgb(12,18,32));
+        LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setBackgroundColor(EndfieldUi.BG);
         root.setOnApplyWindowInsetsListener((v,i)->{root.setPadding(dp(20)+i.getSystemWindowInsetLeft(),dp(12)+i.getSystemWindowInsetTop(),dp(20)+i.getSystemWindowInsetRight(),dp(12)+i.getSystemWindowInsetBottom());return i.consumeSystemWindowInsets();});
         ScrollView wrapper=new ScrollView(this);wrapper.addView(root);setContentView(wrapper);
-        root.addView(text("本地收音测试",23));
+        root.addView(EndfieldUi.label(this,"// MICROPHONE TEST"));root.addView(text("本地收音测试",28));root.addView(EndfieldUi.rule(this));
         root.addView(text("录制 15 秒英语讲话，再分别回听原声和处理后声音。可让电脑播放同一段英语，在同一位置比较不同输入模式。",15));
         root.addView(text("不调用 API、不上传、不保存音频文件。回听不会额外统一音量，方便直接比较。测试期间请保持此页面；返回或锁屏会停止收音和播放。",13));
         path=text("使用设置页面刚才选择的收音选项",12);root.addView(path);
-        status=text("准备就绪 · 点击开始测试",15);root.addView(status);
+        status=text("准备就绪 / 点击开始测试",15);root.addView(status);
         levels=text("录制期间显示原始和输出音量",13);root.addView(levels);
         start=button("开始 15 秒测试",root);raw=button("回听原声",root);processed=button("回听处理后声音",root);stop=button("停止录音或回听",root);
+        EndfieldUi.style(start,true,false);
         Button back=button("返回设置",root);
         raw.setEnabled(false);processed.setEnabled(false);stop.setEnabled(false);
         start.setOnClickListener(v->begin());raw.setOnClickListener(v->play(rawAudio,"原声"));processed.setOnClickListener(v->play(processedAudio,"处理后声音"));
-        stop.setOnClickListener(v->{if(session!=null){cancelRecording();status.setText("测试已中断 · 点击开始重新录制");}else{stopPlayback();status.setText("回听已停止 · 可再次回听或重新测试");}});
+        stop.setOnClickListener(v->{if(session!=null){cancelRecording();status.setText("测试已中断 / 点击开始重新录制");}else{stopPlayback();status.setText("回听已停止 / 可再次回听或重新测试");}});
         back.setOnClickListener(v->finish());
     }
     @Override protected void onResume(){super.onResume();foreground=true;if(pendingPermission){pendingPermission=false;begin();}}
     @Override protected void onPause(){
         foreground=false;boolean interrupted=session!=null;cancelRecording();stopPlayback();
-        if(interrupted)status.setText("测试已中断 · 点击开始重新录制");
+        if(interrupted)status.setText("测试已中断 / 点击开始重新录制");
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);super.onPause();
     }
     @Override protected void onDestroy(){rawAudio=null;processedAudio=null;main.removeCallbacksAndMessages(null);super.onDestroy();}
     @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results){
         super.onRequestPermissionsResult(request,permissions,results);
         if(request==71){if(results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED){if(foreground)begin();else pendingPermission=true;}
-            else status.setText("需要麦克风权限 · 可在系统设置中允许");}
+            else status.setText("需要麦克风权限 / 可在系统设置中允许");}
     }
     private void begin(){
         if(!foreground||session!=null)return;
@@ -88,18 +89,18 @@ public final class AudioCheckActivity extends Activity {
                     System.arraycopy(chunk,0,s.processed,kept,chunk.length);kept+=chunk.length;filled=0;
                     final int seconds=kept/32000;
                     if(kept%9600==0||kept==TEST_BYTES)main.post(()->{if(session==s&&foreground){
-                        status.setText("正在录制 "+seconds+" / 15 秒 · "+m.state);
+                        status.setText("正在录制 "+seconds+" / 15 秒 / "+m.state);
                         levels.setText(String.format(Locale.UK,"原始 %.0f → 输出 %.0f dBFS\n增益 %+.1f dB",m.rmsDb,m.outputDb,m.gainDb));
                     }});
                 }
             }
-        }catch(SecurityException e){error="麦克风权限不可用 · 请在系统设置中允许后重试";}
-        catch(Exception e){error="收音测试失败 · 请检查麦克风是否被占用，或换一种输入模式";}
+        }catch(SecurityException e){error="麦克风权限不可用 / 请在系统设置中允许后重试";}
+        catch(Exception e){error="收音测试失败 / 请检查麦克风是否被占用，或换一种输入模式";}
         finally{if(input!=null)input.close();s.input=null;}
         final boolean complete=s.active&&kept==TEST_BYTES;final String result=error;
         main.post(()->{if(session!=s||!foreground)return;session=null;start.setEnabled(true);stop.setEnabled(false);getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-            if(complete){rawAudio=s.raw;processedAudio=s.processed;raw.setEnabled(true);processed.setEnabled(true);status.setText("测试完成 · 分别回听，比较清晰度、轻声和句尾");}
-            else status.setText(result.isEmpty()?"测试中断 · 点击开始重新录制":result);
+            if(complete){rawAudio=s.raw;processedAudio=s.processed;raw.setEnabled(true);processed.setEnabled(true);status.setText("测试完成 / 分别回听，比较清晰度、轻声和句尾");}
+            else status.setText(result.isEmpty()?"测试中断 / 点击开始重新录制":result);
         });
     }
     private void cancelRecording(){
@@ -117,11 +118,11 @@ public final class AudioCheckActivity extends Activity {
             if(track.getState()==AudioTrack.STATE_UNINITIALIZED||track.write(data,0,data.length)!=data.length)throw new IOException("playback setup");
             player=track;final AudioTrack active=track;
             track.setPlaybackPositionUpdateListener(new AudioTrack.OnPlaybackPositionUpdateListener(){
-                @Override public void onMarkerReached(AudioTrack t){if(player==active){stopPlayback();status.setText("回听结束 · 可比较另一段声音");}}
+                @Override public void onMarkerReached(AudioTrack t){if(player==active){stopPlayback();status.setText("回听结束 / 可比较另一段声音");}}
                 @Override public void onPeriodicNotification(AudioTrack t){}
             },main);
-            track.setNotificationMarkerPosition(data.length/2);track.play();stop.setEnabled(true);status.setText("正在回听"+name+" · 使用手机媒体音量调节");
-        }catch(Exception e){if(player==track)stopPlayback();else if(track!=null)track.release();status.setText("回听失败 · 可尝试重新录制");}
+            track.setNotificationMarkerPosition(data.length/2);track.play();stop.setEnabled(true);status.setText("正在回听"+name+" / 使用手机媒体音量调节");
+        }catch(Exception e){if(player==track)stopPlayback();else if(track!=null)track.release();status.setText("回听失败 / 可尝试重新录制");}
     }
     private void stopPlayback(){AudioTrack track=player;player=null;if(track!=null){try{track.stop();}catch(Exception ignored){}track.release();}if(stop!=null&&session==null)stop.setEnabled(false);}
 }

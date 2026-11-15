@@ -14,7 +14,7 @@ cache.mkdir(parents=True,exist_ok=True)
 if not jar.exists():urllib.request.urlretrieve('https://repo.maven.apache.org/maven2/org/json/json/20240303/json-20240303.jar',jar)
 with tempfile.TemporaryDirectory() as d:
     deps=os.pathsep.join(map(str,[jar,android]))
-    files=[java/'AudioProcessor.java',java/'Lecture.java',java/'LectureStore.java',root/'tests/CoreTests.java',root/'tests/CodecTests.java',java/'OfflineSegments.java',root/'tests/OfflineSegmentsTests.java']
+    files=[java/'AudioProcessor.java',java/'Lecture.java',java/'LectureStore.java',root/'tests/CoreTests.java',root/'tests/CodecTests.java',java/'OfflineSegments.java',root/'tests/OfflineSegmentsTests.java',java/'ModelCatalog.java',java/'OfflineModel.java',root/'tests/ModelInstallTests.java']
     subprocess.run(['java','-m','jdk.compiler/com.sun.tools.javac.Main','-encoding','UTF-8','-classpath',deps,'-d',d,*map(str,files)],check=True)
-    for name in ['CoreTests','CodecTests','OfflineSegmentsTests']:
+    for name in ['CoreTests','CodecTests','OfflineSegmentsTests','ModelInstallTests']:
         subprocess.run(['java','-cp',d+os.pathsep+deps,'com.yeezi.classlive.'+name],check=True)
