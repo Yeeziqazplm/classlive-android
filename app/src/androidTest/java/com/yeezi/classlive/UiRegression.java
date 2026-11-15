@@ -40,6 +40,6 @@ public final class UiRegression extends Instrumentation {
         ui(()->call("about"));shot("08-about");
         Activity audio=startActivitySync(new Intent(getTargetContext(),AudioCheckActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));shot("09-microphone");ui(audio::finish);
         result.putString("stream","CLASSLIVE_UI_PASS "+checks+" checks\n");finish(Activity.RESULT_OK,result);
-    }catch(Throwable e){result.putString("stream","CLASSLIVE_UI_FAIL "+android.util.Log.getStackTraceString(e));finish(Activity.RESULT_CANCELED,result);}}
+    }catch(Throwable e){try{shot("failure");}catch(Exception ignored){}result.putString("stream","CLASSLIVE_UI_FAIL "+android.util.Log.getStackTraceString(e));finish(Activity.RESULT_CANCELED,result);}}
     void clickText(String text){AccessibilityNodeInfo root=getUiAutomation().getRootInActiveWindow();List<AccessibilityNodeInfo> nodes=root.findAccessibilityNodeInfosByText(text);boolean clicked=false;for(AccessibilityNodeInfo n:nodes)if(text.contentEquals(n.getText()==null?"":n.getText())){clicked=n.performAction(AccessibilityNodeInfo.ACTION_CLICK);if(clicked)break;}check(clicked,"button not clickable: "+text);}
 }

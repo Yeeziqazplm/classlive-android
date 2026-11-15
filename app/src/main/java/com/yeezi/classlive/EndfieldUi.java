@@ -30,7 +30,7 @@ final class EndfieldUi {
         Context c=b.getContext();StateListDrawable states=new StateListDrawable();
         states.addState(new int[]{-android.R.attr.state_enabled},new Cut(c,CHIP));
         states.addState(new int[]{android.R.attr.state_pressed},new Cut(c,primary?0xFF92C4A2:0xFF46564A));
-        states.addState(new int[]{android.R.attr.state_focused},new Cut(c,0xFF46564A));
+        states.addState(new int[]{android.R.attr.state_focused},new Cut(c,primary?0xFF92C4A2:0xFF46564A));
         states.addState(new int[]{},new Cut(c,primary?ACCENT:CHIP));b.setBackground(states);
         b.setTextColor(new ColorStateList(new int[][]{{-android.R.attr.state_enabled},{}},new int[]{MUTED,danger?DANGER:primary?ON_ACCENT:INK}));
         b.setTypeface(null,Typeface.BOLD);

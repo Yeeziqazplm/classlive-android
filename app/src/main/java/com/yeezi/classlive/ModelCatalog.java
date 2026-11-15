@@ -7,7 +7,7 @@ final class ModelCatalog {
         Spec(String id,long size,String sha,String description){this.id=id;this.name="parakeet-unified-en-0.6b-"+id+".gguf";this.size=size;this.sha256=sha;this.description=description;}
         String url(){return "https://huggingface.co/handy-computer/parakeet-unified-en-0.6b-gguf/resolve/"+REVISION+"/"+name;}
         String sizeLabel(){return Math.round(size/1000000d)+" MB";}
-        String label(){return "Parakeet English · "+id.replace("_K_M", "").replace("_K", "").replace("_0", "");}
+        String label(){return "Parakeet English / "+id.replace("_K_M", "").replace("_K", "").replace("_0", "");}
     }
     static final Spec[] ALL={
         new Spec("Q4_K_M", 477274496L, "a8bf3de2b393bd14ead5a858c3748d5e3b07a20fdeabdd3b498fba4f463fa929", "推荐日常课堂；占用最小，延续测试版配置。"),

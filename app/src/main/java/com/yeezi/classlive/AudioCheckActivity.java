@@ -31,7 +31,7 @@ public final class AudioCheckActivity extends Activity {
     private Button button(String title,LinearLayout parent){Button b=EndfieldUi.button(this,title);LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.topMargin=dp(10);parent.addView(b,lp);return b;}
     @Override public void onCreate(Bundle state){
         super.onCreate(state);
-        LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setBackgroundColor(EndfieldUi.BG);
+        LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setBackgroundColor(EndfieldUi.BG);root.setPadding(dp(20),dp(12),dp(20),dp(12));
         root.setOnApplyWindowInsetsListener((v,i)->{root.setPadding(dp(20)+i.getSystemWindowInsetLeft(),dp(12)+i.getSystemWindowInsetTop(),dp(20)+i.getSystemWindowInsetRight(),dp(12)+i.getSystemWindowInsetBottom());return i.consumeSystemWindowInsets();});
         ScrollView wrapper=new ScrollView(this);wrapper.addView(root);setContentView(wrapper);
         root.addView(EndfieldUi.label(this,"// MICROPHONE TEST"));root.addView(text("本地收音测试",28));root.addView(EndfieldUi.rule(this));

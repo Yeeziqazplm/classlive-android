@@ -32,7 +32,7 @@ public class MainActivity extends Activity {
     private volatile boolean destroyed;
     private Capture capture;private Runnable afterStop;
     private boolean installingModel;
-    private FrameLayout pages; private LinearLayout live; private final Button[] tabs=new Button[3];
+    private FrameLayout pages; private LinearLayout live,dock; private final Button[] tabs=new Button[3];
     private String page="live"; private int pageGeneration; private ModelCatalog.Spec importSpec;
     private final Runnable scrollToLatest=()->{if(follow!=null&&follow.isChecked()&&page.equals("live"))scroll.scrollTo(0,Math.max(0,list.getHeight()-scroll.getHeight()+scroll.getPaddingBottom()));};
     private volatile Call modelDownload;
@@ -84,7 +84,7 @@ public class MainActivity extends Activity {
         }catch(Exception e){status.setText("旧记录读取异常，原文件已保留");toast("旧记录读取异常，已保留原文件。可新建课堂继续使用。");if(store!=null){current=fresh("新课堂");loaded.put(current.id,current);persist(current);prefs.edit().putString("currentLecture",current.id).apply();showLecture();}}
     }
     private void buildUi(){
-        LinearLayout root=column();root.setBackgroundColor(bg);
+        LinearLayout root=column();root.setBackgroundColor(bg);root.setPadding(dp(16),0,dp(16),0);
         root.setOnApplyWindowInsetsListener((v,i)->{root.setPadding(dp(16)+i.getSystemWindowInsetLeft(),i.getSystemWindowInsetTop(),dp(16)+i.getSystemWindowInsetRight(),i.getSystemWindowInsetBottom());return i.consumeSystemWindowInsets();});
         pages=new FrameLayout(this);root.addView(pages,new LinearLayout.LayoutParams(-1,0,1));
         live=column();pages.addView(live,new FrameLayout.LayoutParams(-1,-1));
@@ -99,7 +99,7 @@ public class MainActivity extends Activity {
         scroll=new ScrollView(this);scroll.setFillViewport(true);scroll.setClipToPadding(false);scroll.setPadding(0,0,0,dp(20));
         list=column();scroll.addView(list);live.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
         // A measured sibling, never a floating overlay. Keep the transcript above this dock.
-        LinearLayout dock=column();dock.setPadding(0,dp(8),0,dp(8));dock.addView(EndfieldUi.rule(this));
+        dock=column();dock.setGravity(Gravity.CENTER_VERTICAL);dock.setPadding(0,dp(8),0,dp(8));dock.addView(EndfieldUi.rule(this));
         partial=text("等待老师讲话…",14,muted);partial.setMaxLines(2);partial.setEllipsize(android.text.TextUtils.TruncateAt.START);partial.setBackground(shape(panel));partial.setPadding(dp(12),dp(8),dp(12),dp(8));dock.addView(partial);
         quality=text(enhance?"音量优化已开启":"原声收音",11,muted);quality.setPadding(0,dp(4),0,dp(4));dock.addView(quality);
         details=text("前台收音 / 切换应用会暂停",12,muted);details.setVisibility(View.GONE);dock.addView(details);
@@ -114,7 +114,15 @@ public class MainActivity extends Activity {
         list.addOnLayoutChangeListener((v,l,t,r,bt,ol,ot,or,ob)->{if(bt-t!=ob-ot)followLatest();});
         scroll.addOnLayoutChangeListener((v,l,t,r,bt,ol,ot,or,ob)->{if(bt-t!=ob-ot)followLatest();});
     }
-    private void adaptHeight(){if(live==null)return;boolean compact=getResources().getConfiguration().screenHeightDp<500;live.getChildAt(0).setVisibility(compact?View.GONE:View.VISIBLE);status.setVisibility(compact?View.GONE:View.VISIBLE);quality.setVisibility(compact?View.GONE:View.VISIBLE);partial.setMaxLines(compact?1:2);}
+    private void adaptHeight(){
+        if(live==null)return;boolean compact=getResources().getConfiguration().screenHeightDp<500;
+        live.getChildAt(0).setVisibility(compact?View.GONE:View.VISIBLE);status.setVisibility(compact?View.GONE:View.VISIBLE);quality.setVisibility(compact?View.GONE:View.VISIBLE);
+        dock.setOrientation(compact?LinearLayout.HORIZONTAL:LinearLayout.VERTICAL);dock.getChildAt(0).setVisibility(compact?View.GONE:View.VISIBLE);
+        partial.setMaxLines(compact?1:2);partial.setLayoutParams(new LinearLayout.LayoutParams(compact?0:-1,-2,compact?1:0));
+        LinearLayout.LayoutParams action=new LinearLayout.LayoutParams(compact?dp(160):-1,-2);if(compact)action.leftMargin=dp(12);start.setLayoutParams(action);
+        String[] en={"LIVE","RECORDS","SETTINGS"},zh={"听课","记录","设置"};
+        for(int i=0;i<3;i++)tabs[i].setText(compact?zh[i]+" / "+en[i]:en[i]+"\n"+zh[i]);
+    }
     @Override public void onConfigurationChanged(android.content.res.Configuration configuration){super.onConfigurationChanged(configuration);adaptHeight();followLatest();}
     private void selectTab(int index){for(int i=0;i<3;i++){EndfieldUi.style(tabs[i],i==index,false);tabs[i].setSelected(i==index);tabs[i].setContentDescription(new String[]{"听课","记录","设置"}[i]+(i==index?"，当前页面":""));}}
     private void showLive(){page="live";pageGeneration++;while(pages.getChildCount()>1)pages.removeViewAt(1);live.setVisibility(View.VISIBLE);selectTab(0);followLatest();}

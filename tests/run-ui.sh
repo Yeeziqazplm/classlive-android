@@ -16,6 +16,7 @@ for size in 390 360 430 landscape; do
   if [ "$size" = 360 ]; then adb shell settings put system font_scale 1.3; else adb shell settings put system font_scale 1.0; fi
   adb shell am force-stop com.yeezi.classlive.v1
   adb shell am instrument -w -e suffix "-$size" com.yeezi.classlive.v1.test/com.yeezi.classlive.UiRegression | tee "qa/ui-$size.txt"
-  adb pull /sdcard/Android/data/com.yeezi.classlive.v1/files/qa qa/screenshots
+  mkdir -p "qa/screenshots/$size"
+  adb pull /sdcard/Android/data/com.yeezi.classlive.v1/files/qa/. "qa/screenshots/$size"
   grep -q CLASSLIVE_UI_PASS "qa/ui-$size.txt"
 done
