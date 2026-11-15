@@ -2,4 +2,4 @@
 <item name="android:fontFamily">sans</item><item name="android:windowLightStatusBar">false</item>
 <item name="android:statusBarColor">#141615</item><item name="android:navigationBarColor">#141615</item>
 <item name="android:colorAccent">#B8F5CC</item><item name="android:windowActionModeOverlay">true</item>
-<item name="android:windowBackground">#141615</item><item name="android:colorControlHighlight">#46564A</item><item name="android:windowLightNavigationBar">false</item><item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item></style></resources>
+<item name="android:windowBackground">#141615</item><item name="android:colorControlHighlight">#46564A</item></style></resources>
