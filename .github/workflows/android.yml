@@ -19,6 +19,12 @@ jobs:
         with:
           path: .ci-signing/debug.keystore
           key: classlive-v1-debug-signing
+      - name: Prepare install signature
+        run: |
+          mkdir -p .ci-signing
+          if [ ! -f .ci-signing/debug.keystore ]; then
+            keytool -genkeypair -keystore .ci-signing/debug.keystore -storepass android -alias androiddebugkey -keypass android -dname "CN=ClassLive, O=Yeezi, C=UK" -keyalg RSA -keysize 2048 -validity 10000
+          fi
       - uses: actions/cache@v4
         id: native
         with:
