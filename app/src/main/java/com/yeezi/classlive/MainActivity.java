@@ -19,7 +19,7 @@ import java.util.concurrent.*;
 import okhttp3.*;
 
 public class MainActivity extends Activity {
-    private final int bg=Color.rgb(12,18,32),panel=Color.rgb(24,34,51),mint=Color.rgb(117,224,192),white=Color.rgb(239,244,250),muted=Color.rgb(161,177,195),amber=Color.rgb(255,203,120);
+    private final int bg=EndfieldUi.BG,panel=EndfieldUi.PANEL,mint=EndfieldUi.ACCENT,white=EndfieldUi.INK,muted=EndfieldUi.MUTED,amber=EndfieldUi.INK;
     private final Handler main=new Handler(Looper.getMainLooper());
     private final OkHttpClient http=new OkHttpClient.Builder().connectTimeout(12,TimeUnit.SECONDS).readTimeout(30,TimeUnit.SECONDS).callTimeout(40,TimeUnit.SECONDS).build();
     private final ThreadPoolExecutor translators=new ThreadPoolExecutor(2,2,0,TimeUnit.SECONDS,new ArrayBlockingQueue<Runnable>(60));

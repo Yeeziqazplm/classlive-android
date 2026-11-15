@@ -17,7 +17,7 @@ jobs:
           packages: 'platform-tools platforms;android-35 build-tools;34.0.0 ndk;28.2.13676358'
       - uses: actions/cache@v4
         with:
-          path: ~/.android/debug.keystore
+          path: .ci-signing/debug.keystore
           key: classlive-v1-debug-signing
       - uses: actions/cache@v4
         id: native
@@ -29,6 +29,11 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with: { gradle-version: '8.9' }
       - run: gradle :app:assembleDebug :app:lintDebug :app:assembleDebugAndroidTest
+      - name: Preserve install signature
+        uses: actions/cache/save@v4
+        with:
+          path: .ci-signing/debug.keystore
+          key: classlive-v1-debug-signing
       - run: python3 test_core.py
       - run: cp app/build/outputs/apk/debug/app-debug.apk ClassLive1.0.apk
       - uses: actions/upload-artifact@v4
